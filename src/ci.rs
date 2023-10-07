@@ -460,11 +460,14 @@ jobs:\n",
 "#,
             needs = needs.join(", ")
         ));
+        conf.push_str(
+            r#"    permissions:
+      id-token: write
+"#,
+        );
         if platforms.contains(&Platform::Emscripten) {
             conf.push_str(
-                r#"    permissions:
-      # Used to upload release artifacts
-      contents: write
+                r#"      contents: write
 "#,
             );
         }
@@ -475,8 +478,6 @@ jobs:\n",
           name: wheels
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         with:
           command: upload
           args: --non-interactive --skip-existing *
@@ -513,6 +514,7 @@ jobs:\n",
 #[cfg(test)]
 mod tests {
     use super::GenerateCI;
+    use super::Platform;
     use crate::BridgeModel;
     use expect_test::expect;
 
@@ -634,14 +636,14 @@ mod tests {
                 runs-on: ubuntu-latest
                 if: "startsWith(github.ref, 'refs/tags/')"
                 needs: [linux, windows, macos, sdist]
+                permissions:
+                  id-token: write
                 steps:
                   - uses: actions/download-artifact@v3
                     with:
                       name: wheels
                   - name: Publish to PyPI
                     uses: PyO3/maturin-action@v1
-                    env:
-                      MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
                     with:
                       command: upload
                       args: --non-interactive --skip-existing *"#]];
@@ -747,14 +749,14 @@ mod tests {
                 runs-on: ubuntu-latest
                 if: "startsWith(github.ref, 'refs/tags/')"
                 needs: [linux, windows, macos]
+                permissions:
+                  id-token: write
                 steps:
                   - uses: actions/download-artifact@v3
                     with:
                       name: wheels
                   - name: Publish to PyPI
                     uses: PyO3/maturin-action@v1
-                    env:
-                      MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
                     with:
                       command: upload
                       args: --non-interactive --skip-existing *"#]];
@@ -923,14 +925,14 @@ mod tests {
                 runs-on: ubuntu-latest
                 if: "startsWith(github.ref, 'refs/tags/')"
                 needs: [linux, windows, macos, sdist]
+                permissions:
+                  id-token: write
                 steps:
                   - uses: actions/download-artifact@v3
                     with:
                       name: wheels
                   - name: Publish to PyPI
                     uses: PyO3/maturin-action@v1
-                    env:
-                      MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
                     with:
                       command: upload
                       args: --non-interactive --skip-existing *"#]];
@@ -1041,17 +1043,127 @@ mod tests {
                 runs-on: ubuntu-latest
                 if: "startsWith(github.ref, 'refs/tags/')"
                 needs: [linux, windows, macos, sdist]
+                permissions:
+                  id-token: write
                 steps:
                   - uses: actions/download-artifact@v3
                     with:
                       name: wheels
                   - name: Publish to PyPI
                     uses: PyO3/maturin-action@v1
-                    env:
-                      MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
                     with:
                       command: upload
                       args: --non-interactive --skip-existing *"#]];
+        expected.assert_eq(&conf);
+    }
+
+    #[test]
+    fn test_generate_github_platform_emscripten() {
+        let conf = GenerateCI {
+            platforms: vec![Platform::Emscripten],
+            ..Default::default()
+        }
+        .generate_github(
+            "example",
+            &BridgeModel::Bindings("pyo3".to_string(), 7),
+            true,
+        )
+        .unwrap()
+        .lines()
+        .skip(5)
+        .collect::<Vec<_>>()
+        .join("\n");
+        let expected = expect![[r#"
+            name: CI
+
+            on:
+              push:
+                branches:
+                  - main
+                  - master
+                tags:
+                  - '*'
+              pull_request:
+              workflow_dispatch:
+
+            permissions:
+              contents: read
+
+            jobs:
+              emscripten:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v3
+                  - run: pip install pyodide-build
+                  - name: Get Emscripten and Python version info
+                    shell: bash
+                    run: |
+                      echo EMSCRIPTEN_VERSION=$(pyodide config get emscripten_version) >> $GITHUB_ENV
+                      echo PYTHON_VERSION=$(pyodide config get python_version | cut -d '.' -f 1-2) >> $GITHUB_ENV
+                      pip uninstall -y pyodide-build
+                  - uses: mymindstorm/setup-emsdk@v12
+                    with:
+                      version: ${{ env.EMSCRIPTEN_VERSION }}
+                      actions-cache-folder: emsdk-cache
+                  - uses: actions/setup-python@v4
+                    with:
+                      python-version: ${{ env.PYTHON_VERSION }}
+                  - run: pip install pyodide-build
+                  - name: Build wheels
+                    uses: PyO3/maturin-action@v1
+                    with:
+                      target: wasm32-unknown-emscripten
+                      args: --release --out dist -i ${{ env.PYTHON_VERSION }}
+                      sccache: 'true'
+                      rust-toolchain: nightly
+                  - name: Upload wheels
+                    uses: actions/upload-artifact@v3
+                    with:
+                      name: wasm-wheels
+                      path: dist
+
+              sdist:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v3
+                  - name: Build sdist
+                    uses: PyO3/maturin-action@v1
+                    with:
+                      command: sdist
+                      args: --out dist
+                  - name: Upload sdist
+                    uses: actions/upload-artifact@v3
+                    with:
+                      name: wheels
+                      path: dist
+
+              release:
+                name: Release
+                runs-on: ubuntu-latest
+                if: "startsWith(github.ref, 'refs/tags/')"
+                needs: [emscripten, sdist]
+                permissions:
+                  id-token: write
+                  contents: write
+                steps:
+                  - uses: actions/download-artifact@v3
+                    with:
+                      name: wheels
+                  - name: Publish to PyPI
+                    uses: PyO3/maturin-action@v1
+                    with:
+                      command: upload
+                      args: --non-interactive --skip-existing *
+                  - uses: actions/download-artifact@v3
+                    with:
+                      name: wasm-wheels
+                      path: wasm
+                  - name: Upload to GitHub Release
+                    uses: softprops/action-gh-release@v1
+                    with:
+                      files: |
+                        wasm/*.whl
+                      prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}"#]];
         expected.assert_eq(&conf);
     }
 }

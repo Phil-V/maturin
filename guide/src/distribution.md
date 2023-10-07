@@ -289,3 +289,11 @@ Options:
   -h, --help
           Print help information (use `-h` for a summary)
 ```
+
+### Using PyPI's trusted publishing
+
+By default, the workflow provided by `generate-ci` will publish the release artifacts to PyPI without manual API token management using [trusted publishing (OpenID Connect)](https://docs.pypi.org/trusted-publishers/).
+
+Make sure to follow the steps listed in [PyPI's documentation](https://docs.pypi.org/trusted-publishers/adding-a-publisher/) to set up your GitHub project as a trusted publisher in the PyPI project settings before attempting to run the workflow.
+
+For more information, consult the [GitHub documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-pypi) on the subject.
